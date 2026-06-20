@@ -1,0 +1,13 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+# .gitignore file for Python projects
+__pycache__/*
+bin/*
+include/*
+lib/*
+share/*
+pyvenv.cfg
+sonde_graph_*.png
+*.json
+
+#MacOS files
+.DS_Store
