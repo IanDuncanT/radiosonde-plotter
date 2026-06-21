@@ -630,9 +630,43 @@ fig.patches.extend([plt.Rectangle((0.635, 0.05), 0.29, 0.37,
                                   linewidth=1, alpha=1, transform=fig.transFigure,
                                   figure=fig)])
 
+# Compute launch index and landing index
+filter_window_launch = 5
+filter_window_landing = 5
+filter_velocity_launch = 1.5  # m/s — threshold for "ascending"
+filter_velocity_landing = 1.0  # m/s — threshold for "descending"
+
+vel_v = filtered_data[:, 8].astype(float)
+
+# Find first index where N consecutive packets all have vel_v > threshold
+launch_idx = None
+for i in range(len(vel_v) - filter_window_launch):
+    window = vel_v[i : i + filter_window_launch]
+    if np.all(window > filter_velocity_launch):
+        launch_idx = i
+        break
+if launch_idx is None:
+    print("Warning: could not detect launch, defaulting to index 0")
+    launch_idx = 0
+
+# Find the landing index after launch where velocity becomes 0
+descent_data  = filtered_data[burst_idx:]
+descent_vel_v = vel_v[burst_idx:]
+
+landing_local_idx = len(descent_data) - 1   # default: last packet
+
+for i in range(len(descent_vel_v) - filter_window_landing):
+    window = descent_vel_v[i : i + filter_window_landing]
+    if np.all(np.abs(window) < filter_velocity_landing):
+        landing_local_idx = i
+        break
+landing_idx = burst_idx + landing_local_idx
+
+print(f"Detected launch index: {launch_idx}, landing index: {landing_idx}")
+
 # Compute statistics
 flight_times = filtered_data[:, 0]  # datetime objects
-t_launch  = flight_times[0]
+t_launch  = flight_times[launch_idx]
 t_burst   = flight_times[burst_map_idx]
 t_landing = flight_times[landing_idx]
 
