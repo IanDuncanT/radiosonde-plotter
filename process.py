@@ -40,6 +40,8 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colormaps as cm
+from matplotlib.collections import LineCollection
+import matplotlib.patheffects as pe
 import scipy.stats as stats
 import datetime
 from scipy.signal import medfilt
@@ -97,6 +99,24 @@ with open(f'{sonde_id}.json') as f:
     raw_data = json.load(f)
 
 print(f"Raw packets loaded: {len(raw_data)}")
+
+# Extract unique ground station positions from raw packets
+ground_stations = {}
+for pkt in raw_data:
+    if 'uploader_callsign' in pkt:
+        callsign = pkt['uploader_callsign']
+        if callsign not in ground_stations:
+            try:
+                ground_stations[callsign] = {'count': 0}
+            except Exception:
+                pass
+        if 'position' in pkt and callsign not in ground_stations[callsign]:
+            try:
+                lat_s, lon_s = pkt['position'].split(',')
+                ground_stations[callsign]['position'] = (float(lat_s), float(lon_s))
+            except Exception:
+                pass
+        ground_stations[callsign]['count'] += 1
 
 # =============================================================================
 # Step 1: Parse into list of lists
@@ -273,6 +293,7 @@ skew.ax.set_xlim(-20, 30)
 # Set some better labels than the default to increase readability
 skew.ax.set_xlabel(f'Temperature ({temperature.units:~P})', weight='bold')
 skew.ax.set_ylabel(f'Pressure ({pressure.units:~P})', weight='bold')
+skew.ax.set_title('Skew-T', weight='bold', fontsize=12)
 
 # Set the facecolor of the skew-t object and the figure to white
 fig.set_facecolor('#ffffff')
@@ -312,46 +333,49 @@ skew.plot(pressure, prof, 'k', linewidth=2, label='SB Parcel Path')
 skew.shade_cin(pressure, temperature, prof, dewpoint, alpha=0.2, label='SBCIN')
 skew.shade_cape(pressure, temperature, prof, alpha=0.2, label='SBCAPE')
 
+# Add a legend
+skew.ax.legend(loc='upper left', fontsize=9, framealpha=0.8)
+
 # Create axis and the hodograph plot object — middle column, top half
-hodo_ax = plt.axes((0.37, 0.45, 0.28, 0.50))
-h = Hodograph(hodo_ax, component_range=40.)
+hodo_ax = plt.axes((0.36, 0.45, 0.28, 0.50))
+hodo = Hodograph(hodo_ax, component_range=40.)
 
 # Add two grid increments to the hodograph
-h.add_grid(increment=20, ls='-', lw=1.5, alpha=0.5)
-h.add_grid(increment=10, ls='--', lw=1, alpha=0.2)
+hodo.add_grid(increment=20, ls='-', lw=1.5, alpha=0.5)
+hodo.add_grid(increment=10, ls='--', lw=1, alpha=0.2)
 
 # Remove several elements to increase readability
-h.ax.set_box_aspect(1)
-h.ax.set_yticklabels([])
-h.ax.set_xticklabels([])
-h.ax.set_xticks([])
-h.ax.set_yticks([])
-h.ax.set_xlabel(' ')
-h.ax.set_ylabel(' ')
+hodo.ax.set_box_aspect(1)
+hodo.ax.set_yticklabels([])
+hodo.ax.set_xticklabels([])
+hodo.ax.set_xticks([])
+hodo.ax.set_yticks([])
+hodo.ax.set_xlabel(' ')
+hodo.ax.set_ylabel(' ')
 
 # Add custom ticks to the hodograph
 plt.xticks(np.arange(0, 0, 1))
 plt.yticks(np.arange(0, 0, 1))
 for i in range(10, 120, 10):
-    h.ax.annotate(str(i), (i, 0), xytext=(0, 2), textcoords='offset pixels',
+    hodo.ax.annotate(str(i), (i, 0), xytext=(0, 2), textcoords='offset pixels',
                   clip_on=True, fontsize=10, weight='bold', alpha=0.3, zorder=0)
 for i in range(10, 120, 10):
-    h.ax.annotate(str(i), (0, i), xytext=(0, 2), textcoords='offset pixels',
+    hodo.ax.annotate(str(i), (0, i), xytext=(0, 2), textcoords='offset pixels',
                   clip_on=True, fontsize=10, weight='bold', alpha=0.3, zorder=0)
 
 # Plot hodograph with continuous altitude color scale
-h.plot_colormapped(u_wind_smooth_coarse, v_wind_smooth_coarse, c=altitude_coarse, lw=3,
+hodo.plot_colormapped(u_wind_smooth_coarse, v_wind_smooth_coarse, c=altitude_coarse, lw=3,
                    cmap='viridis', label='Wind')
 
 # Add a colorbar for the altitude scale
-sm = plt.cm.ScalarMappable(
-    cmap='viridis',
-    norm=plt.Normalize(
-        vmin=altitude_coarse.magnitude.min(),
-        vmax=altitude_coarse.magnitude.max()
-    )
-)
-sm.set_array([])
+# sm = plt.cm.ScalarMappable(
+#     cmap='viridis',
+#     norm=plt.Normalize(
+#         vmin=altitude_coarse.magnitude.min(),
+#         vmax=altitude_coarse.magnitude.max()
+#     )
+# )
+# sm.set_array([])
 
 # Color bar exists for the location plot, so it is redundant here.
 # cbar = plt.colorbar(sm, ax=hodo_ax, orientation='vertical',
@@ -362,18 +386,20 @@ sm.set_array([])
 # Bunkers storm motion markers
 RM, LM, MW = mpcalc.bunkers_storm_motion(pressure, u_wind, v_wind, altitude)
 for vec, label in [(RM, 'RM'), (LM, 'LM'), (MW, 'MW')]:
-    h.ax.plot(vec[0].m, vec[1].m, 'k+', markersize=10, markeredgewidth=2)
-    h.ax.text(vec[0].m + 1, vec[1].m + 1, label, weight='bold',
+    hodo.ax.plot(vec[0].m, vec[1].m, 'k+', markersize=10, markeredgewidth=2)
+    hodo.ax.text(vec[0].m + 1, vec[1].m + 1, label, weight='bold',
               fontsize=11, alpha=0.7)
 
-h.ax.arrow(0, 0, RM[0].m - 0.3, RM[1].m - 0.3, linewidth=2, color='black',
+hodo.ax.arrow(0, 0, RM[0].m - 0.3, RM[1].m - 0.3, linewidth=2, color='black',
            alpha=0.2, label='Bunkers RM Vector',
            length_includes_head=True, head_width=2)
 
-hodoleg = h.ax.legend(loc='upper left')
+# Add a legend and title to the hodograph
+hodo.ax.set_title('Hodograph', weight='bold', fontsize=12)
+hodo.ax.legend(loc='upper left', fontsize=9, framealpha=0.8)
 
 # Create a rectangle for listing parameters — middle column, bottom half
-fig.patches.extend([plt.Rectangle((0.375, 0.05), 0.225, 0.37,
+fig.patches.extend([plt.Rectangle((0.385, 0.05), 0.23, 0.37,
                                   edgecolor='black', facecolor='white',
                                   linewidth=1, alpha=1, transform=fig.transFigure,
                                   figure=fig)])
@@ -424,70 +450,73 @@ sig_tor = mpcalc.significant_tornado(sbcape, lcl_height,
 super_comp = mpcalc.supercell_composite(mucape, total_helicity3, bshear3)
 
 # Plot the parameters in the box
-plt.figtext(0.385, 0.37, 'SBCAPE: ', weight='bold', fontsize=13,
+plt.figtext(0.5, 0.428, 'Weather Indicies', weight='bold', fontsize=12,
+            color='black', ha='center')
+
+plt.figtext(0.395, 0.37, 'SBCAPE: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.495, 0.37, f'{sbcape:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.37, f'{sbcape:.0f~P}', weight='bold',
             fontsize=13, color='orangered', ha='right')
-plt.figtext(0.385, 0.34, 'SBCIN: ', weight='bold',
+plt.figtext(0.395, 0.34, 'SBCIN: ', weight='bold',
             fontsize=13, color='black', ha='left')
-plt.figtext(0.495, 0.34, f'{sbcin:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.34, f'{sbcin:.0f~P}', weight='bold',
             fontsize=13, color='lightblue', ha='right')
-plt.figtext(0.385, 0.29, 'MLCAPE: ', weight='bold', fontsize=13,
+plt.figtext(0.395, 0.29, 'MLCAPE: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.495, 0.29, f'{mlcape:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.29, f'{mlcape:.0f~P}', weight='bold',
             fontsize=13, color='orangered', ha='right')
-plt.figtext(0.385, 0.26, 'MLCIN: ', weight='bold', fontsize=13,
+plt.figtext(0.395, 0.26, 'MLCIN: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.495, 0.26, f'{mlcin:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.26, f'{mlcin:.0f~P}', weight='bold',
             fontsize=13, color='lightblue', ha='right')
-plt.figtext(0.385, 0.21, 'MUCAPE: ', weight='bold', fontsize=13,
+plt.figtext(0.395, 0.21, 'MUCAPE: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.495, 0.21, f'{mucape:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.21, f'{mucape:.0f~P}', weight='bold',
             fontsize=13, color='orangered', ha='right')
-plt.figtext(0.385, 0.18, 'MUCIN: ', weight='bold', fontsize=13,
+plt.figtext(0.395, 0.18, 'MUCIN: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.495, 0.18, f'{mucin:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.18, f'{mucin:.0f~P}', weight='bold',
             fontsize=13, color='lightblue', ha='right')
-plt.figtext(0.385, 0.13, 'TT-INDEX: ', weight='bold', fontsize=13,
+plt.figtext(0.395, 0.13, 'TT-INDEX: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.495, 0.13, f'{total_totals:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.13, f'{total_totals:.0f~P}', weight='bold',
             fontsize=13, color='orangered', ha='right')
-plt.figtext(0.385, 0.10, 'K-INDEX: ', weight='bold', fontsize=13,
+plt.figtext(0.395, 0.10, 'K-INDEX: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.495, 0.10, f'{kindex:.0f~P}', weight='bold',
+plt.figtext(0.505, 0.10, f'{kindex:.0f~P}', weight='bold',
             fontsize=13, color='orangered', ha='right')
 
-plt.figtext(0.505, 0.37, '0-1km SRH: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.37, '0-1km SRH: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.37, f'{total_helicity1:.0f~P}',
+plt.figtext(0.605, 0.37, f'{total_helicity1:.0f~P}',
             weight='bold', fontsize=13, color='navy', ha='right')
-plt.figtext(0.505, 0.34, '0-1km SHEAR: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.34, '0-1km SHEAR: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.34, f'{bshear1:.0f~P}', weight='bold',
+plt.figtext(0.605, 0.34, f'{bshear1:.0f~P}', weight='bold',
             fontsize=13, color='blue', ha='right')
-plt.figtext(0.505, 0.29, '0-3km SRH: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.29, '0-3km SRH: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.29, f'{total_helicity3:.0f~P}',
+plt.figtext(0.605, 0.29, f'{total_helicity3:.0f~P}',
             weight='bold', fontsize=13, color='navy', ha='right')
-plt.figtext(0.505, 0.26, '0-3km SHEAR: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.26, '0-3km SHEAR: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.26, f'{bshear3:.0f~P}', weight='bold',
+plt.figtext(0.605, 0.26, f'{bshear3:.0f~P}', weight='bold',
             fontsize=13, color='blue', ha='right')
-plt.figtext(0.505, 0.21, '0-6km SRH: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.21, '0-6km SRH: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.21, f'{total_helicity6:.0f~P}',
+plt.figtext(0.605, 0.21, f'{total_helicity6:.0f~P}',
             weight='bold', fontsize=13, color='navy', ha='right')
-plt.figtext(0.505, 0.18, '0-6km SHEAR: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.18, '0-6km SHEAR: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.18, f'{bshear6:.0f~P}', weight='bold',
+plt.figtext(0.605, 0.18, f'{bshear6:.0f~P}', weight='bold',
             fontsize=13, color='blue', ha='right')
-plt.figtext(0.505, 0.13, 'SIG TORNADO: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.13, 'SIG TORNADO: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.13, f'{sig_tor[0]:.0f~P}', weight='bold', fontsize=13,
+plt.figtext(0.605, 0.13, f'{sig_tor[0]:.0f~P}', weight='bold', fontsize=13,
             color='orangered', ha='right')
-plt.figtext(0.505, 0.10, 'SUPERCELL COMP: ', weight='bold', fontsize=13,
+plt.figtext(0.515, 0.10, 'SUPERCELL COMP: ', weight='bold', fontsize=13,
             color='black', ha='left')
-plt.figtext(0.595, 0.10, f'{super_comp[0]:.0f~P}', weight='bold', fontsize=13,
+plt.figtext(0.605, 0.10, f'{super_comp[0]:.0f~P}', weight='bold', fontsize=13,
             color='orangered', ha='right')
 
 # =============================================================================
@@ -511,7 +540,7 @@ launch_idx = 0
 burst_map_idx = np.argmax(traj_alt)
 landing_idx = len(traj_alt) - 1
 
-map_ax = fig.add_axes((0.635, 0.05, 0.345, 0.90))
+map_ax = fig.add_axes((0.635, 0.45, 0.345, 0.50))
 map_ax.set_aspect('equal', adjustable='datalim')
 
 # Plot trajectory colored by altitude using same viridis colormap
@@ -519,7 +548,6 @@ alt_norm = plt.Normalize(vmin=traj_alt.min(), vmax=traj_alt.max())
 cmap = plt.cm.viridis
 
 # Draw trajectory as line segments colored by altitude
-from matplotlib.collections import LineCollection
 points = np.array([traj_lon, traj_lat]).T.reshape(-1, 1, 2)
 segments = np.concatenate([points[:-1], points[1:]], axis=1)
 lc = LineCollection(segments, cmap=cmap, norm=alt_norm, linewidth=3, zorder=3)
@@ -527,7 +555,7 @@ lc.set_array(traj_alt[:-1])
 map_ax.add_collection(lc)
 
 # Set map extent with padding
-pad = 0.15
+pad = 0.05
 map_ax.set_xlim(traj_lon.min() - pad, traj_lon.max() + pad)
 map_ax.set_ylim(traj_lat.min() - pad, traj_lat.max() + pad)
 
@@ -553,10 +581,7 @@ map_ax.plot(traj_lon[launch_idx], traj_lat[launch_idx],
 map_ax.annotate('Launch', (traj_lon[launch_idx], traj_lat[launch_idx]),
                 xytext=(6, 6), textcoords='offset points',
                 fontsize=9, weight='bold', color='limegreen',
-                path_effects=[
-                    __import__('matplotlib.patheffects', fromlist=['withStroke'])
-                    .withStroke(linewidth=2, foreground='black')
-                ], zorder=6)
+                path_effects=[pe.withStroke(linewidth=2, foreground='black')], zorder=6)
 
 # Burst marker — red star
 map_ax.plot(traj_lon[burst_map_idx], traj_lat[burst_map_idx],
@@ -567,10 +592,7 @@ map_ax.annotate(f'Burst\n{traj_alt[burst_map_idx]:.0f} m',
                 (traj_lon[burst_map_idx], traj_lat[burst_map_idx]),
                 xytext=(6, 6), textcoords='offset points',
                 fontsize=9, weight='bold', color='red',
-                path_effects=[
-                    __import__('matplotlib.patheffects', fromlist=['withStroke'])
-                    .withStroke(linewidth=2, foreground='black')
-                ], zorder=6)
+                path_effects=[pe.withStroke(linewidth=2, foreground='black')], zorder=6)
 
 # Landing marker — orange downward triangle
 map_ax.plot(traj_lon[landing_idx], traj_lat[landing_idx],
@@ -580,10 +602,7 @@ map_ax.plot(traj_lon[landing_idx], traj_lat[landing_idx],
 map_ax.annotate('Landing', (traj_lon[landing_idx], traj_lat[landing_idx]),
                 xytext=(6, -14), textcoords='offset points',
                 fontsize=9, weight='bold', color='orange',
-                path_effects=[
-                    __import__('matplotlib.patheffects', fromlist=['withStroke'])
-                    .withStroke(linewidth=2, foreground='black')
-                ], zorder=6)
+                path_effects=[pe.withStroke(linewidth=2, foreground='black')], zorder=6)
 
 # Colorbar for altitude on the map
 sm_map = plt.cm.ScalarMappable(cmap=cmap, norm=alt_norm)
@@ -600,13 +619,114 @@ map_ax.legend(loc='lower left', fontsize=9, framealpha=0.8)
 map_ax.tick_params(labelsize=8)
 map_ax.axes.get_xaxis().set_visible(False)
 map_ax.axes.get_yaxis().set_visible(False)
+ 
+# =============================================================================
+# Flight Statistics Box — bottom of far right column
+# =============================================================================
 
-# Add legends to the skew and hodograph
-skewleg = skew.ax.legend(loc='upper left')
-hodoleg = h.ax.legend(loc='upper left')
+# Create a rectangle for listing parameters — right column, bottom half
+fig.patches.extend([plt.Rectangle((0.635, 0.05), 0.29, 0.37,
+                                  edgecolor='black', facecolor='white',
+                                  linewidth=1, alpha=1, transform=fig.transFigure,
+                                  figure=fig)])
+
+# Compute statistics
+flight_times = filtered_data[:, 0]  # datetime objects
+t_launch  = flight_times[0]
+t_burst   = flight_times[burst_map_idx]
+t_landing = flight_times[landing_idx]
+
+duration_total  = (t_landing - t_launch).total_seconds()
+duration_ascent = (t_burst   - t_launch).total_seconds()
+duration_descent= (t_landing - t_burst).total_seconds()
+
+max_alt_m   = traj_alt[burst_map_idx]
+avg_ascent  = max_alt_m / duration_ascent if duration_ascent > 0 else 0
+avg_descent = max_alt_m / duration_descent if duration_descent > 0 else 0
+
+# Horizontal distance from launch to landing (haversine)
+def haversine_km(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    dlat = np.radians(lat2 - lat1)
+    dlon = np.radians(lon2 - lon1)
+    a = np.sin(dlat/2)**2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon/2)**2
+    return R * 2 * np.arcsin(np.sqrt(a))
+
+landing_dist = haversine_km(traj_lat[launch_idx], traj_lon[launch_idx], traj_lat[landing_idx], traj_lon[landing_idx])
+burst_dist   = haversine_km(traj_lat[launch_idx], traj_lon[launch_idx], traj_lat[burst_map_idx], traj_lon[burst_map_idx])
+
+def fmt_duration(secs):
+    h, rem = divmod(int(secs), 3600)
+    m, s   = divmod(rem, 60)
+    return f'{h}h {m:02d}m {s:02d}s' if h else f'{m}m {s:02d}s'
+
+plt.figtext(0.78, 0.428, 'Flight Statistics', weight='bold', fontsize=12,
+            color='black', ha='center')
+
+plt.figtext(0.645, 0.37, 'Total Flight Time: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.77, 0.37, f'{fmt_duration(duration_total)}', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+plt.figtext(0.79, 0.37, 'Max Altitude: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.915, 0.37, f'{max_alt_m:.0f} m', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+
+plt.figtext(0.645, 0.34, 'Ascent Time: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.77, 0.34, f'{fmt_duration(duration_ascent)}', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+plt.figtext(0.79, 0.34, 'Descent Time: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.915, 0.34, f'{fmt_duration(duration_descent)}', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+
+plt.figtext(0.645, 0.31, 'Avg Ascent Rate: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.77, 0.31, f'{avg_ascent:.1f} m/s', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+plt.figtext(0.79, 0.31, 'Avg Descent Rate: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.915, 0.31, f'{avg_descent:.1f} m/s', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+
+plt.figtext(0.645, 0.28, 'Launch to Burst: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.77, 0.28, f'{burst_dist:.1f} km', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+plt.figtext(0.79, 0.28, 'Launch to Landing: ', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.915, 0.28, f'{landing_dist:.1f} km', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+
+plt.figtext(0.645, 0.25, 'Ground Stations:', weight='bold', fontsize=13,
+            color='black', ha='left')
+plt.figtext(0.77, 0.25, f'{len(ground_stations)}', weight='bold',
+            fontsize=13, color='orangered', ha='right')
+
+fig.add_artist(plt.Line2D([0.64, 0.92], [0.22, 0.22], color='lightgrey', linewidth=1.5))
+
+plt.figtext(0.78, 0.195, 'Stations Receiving Data', weight='bold', fontsize=13,
+            color='black', ha='center')
+
+# Build sorted station list (by packet count, descending)
+sorted_stations = sorted(ground_stations.items(), key=lambda x: x[1]['count'], reverse=True)
+station_names = [callsign for callsign, _ in sorted_stations]
+
+# Split into lines of N stations each
+stations_per_line = 4
+lines = [station_names[i:i+stations_per_line] 
+         for i in range(0, len(station_names), stations_per_line)]
+
+line_y = 0.168
+line_spacing = 0.028
+for line in lines:
+    plt.figtext(0.78, line_y, ', '.join(line), fontsize=10,
+                color='black', ha='center')
+    line_y -= line_spacing
 
 # Add plot title — centered across full figure
-plt.figtext(0.5, 0.97, f'Radiosonde {sonde_id} ({sonde_office}) | {sonde_time}',
+plt.figtext(0.5, 0.98, f'Radiosonde {sonde_id} ({sonde_office}) | {sonde_time}',
             weight='bold', fontsize=20, ha='center')
 
 # Show the plot
